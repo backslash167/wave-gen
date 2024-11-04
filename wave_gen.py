@@ -18,24 +18,27 @@ waveform_vertices = [(0, 0), (0.5, 1), (1, 0)]  # Initial sine-like waveform ver
 minimum_delta = 0.0001
 num_points = 10
 
+
 # Function to set waveform based on preset selection
 def set_preset_waveform(waveform_type):
     global waveform_vertices
     if waveform_type == 'sine':
         # Generate `num_points` vertices for a smooth sine wave
-        x_points = np.linspace(0, 1, num_points)  # Generate `num_points` evenly spaced x values from 0 to 1
-        y_points = np.sin(2 * np.pi * x_points)   # Calculate corresponding y values for a sine wave
+        x_points = np.linspace(0, 1, num_points)
+        y_points = np.sin(2 * np.pi * x_points)
         waveform_vertices = list(zip(x_points, y_points))
+
     elif waveform_type == 'triangle':
-        waveform_vertices = [(0, 0), (1/3, 1), (2/3, -1), (1, 0)]
+        waveform_vertices = [(0, 0), (1 / 3, 1), (2 / 3, -1), (1, 0)]
+
     elif waveform_type == 'square':
-        waveform_vertices = [(0, 1), (1/2, 1), ((1/2+minimum_delta), -1), ((1-minimum_delta), -1), (1, 1)]
+        waveform_vertices = [(0, 1), (1 / 2, 1), ((1 / 2 + minimum_delta), -1), ((1 - minimum_delta), -1), (1, 1)]
+
     elif waveform_type == 'sawtooth':
-        # Sawtooth wave vertices, ramping linearly from -1 to 1 over the period
-        waveform_vertices = [(0, -1), (1-minimum_delta, 1), (1, -1)]
+        waveform_vertices = [(0, -1), (1 - minimum_delta, 1), (1, -1)]
 
     logging.info(f"Set waveform to {waveform_type} preset.")
-    update_plot()
+    update_plot()  # Refresh the plot with the new vertices
 
 
 # Function to generate waveform from vertices using interpolation
@@ -44,7 +47,7 @@ def generate_custom_waveform(frames):
 
     # Remove duplicates by creating a dictionary (keeps last occurrence of each x value)
     unique_points = dict(zip(x_points, y_points))
-    x_points, y_points = zip(*sorted(unique_points.items()))  # Sort to maintain order
+    x_points, y_points = zip(*sorted(unique_points.items()))
 
     # Ensure x_points covers exactly one period, from 0 to 1
     if x_points[0] != 0 or x_points[-1] != 1:
@@ -158,16 +161,15 @@ preset_label = tk.Label(preset_frame, text="Waveform Preset")
 preset_label.pack(side="left")
 
 waveform_var = tk.StringVar(root)
-waveform_var.set("sine")  # Default to sine waveform
+waveform_var.set("")  # Default to no preset waveform
 
 dropdown_list = ["sine", "triangle", "square", "sawtooth", "custom"]
 
 # Dropdown menu with waveform options
 preset_dropdown = tk.OptionMenu(
-    preset_frame, waveform_var, dropdown_list[0], *dropdown_list[1:], command=set_preset_waveform
+    preset_frame, waveform_var, "", *dropdown_list, command=set_preset_waveform
 )
 preset_dropdown.pack(side="left")
-
 
 # Matplotlib figure and canvas for interactive waveform editing
 fig, ax = plt.subplots(figsize=(6, 3))
@@ -178,7 +180,7 @@ canvas.get_tk_widget().pack()
 line, = ax.plot(*zip(*waveform_vertices), 'bo-')  # plot vertices as blue circles connected by lines
 ax.set_xlim(0, 1)
 ax.set_ylim(-1.5, 1.5)
-ax.set_title("Edit the Waveform by Adding, Moving, and Deleting Points")
+
 
 # Function to update the plot after modifying vertices
 def update_plot():
@@ -186,7 +188,94 @@ def update_plot():
     line.set_data(x_points, y_points)
     fig.canvas.draw()
 
-# Rest of the vertex editing functions remain unchanged (on_click, on_motion, etc.)
+
+# Vertex interaction management
+selected_vertex = None
+vertex_radius = 0.05  # Threshold distance to detect nearby vertices
+
+
+# Mouse click event to add points anywhere on the graph or move existing ones
+def on_click(event):
+    global selected_vertex
+    if event.inaxes != ax or event.button != 1:  # Only respond to left-clicks
+        return
+
+    # Detect if Ctrl key is held for forced point addition
+    ctrl_held = event.key == 'control' if event.key is not None else False
+
+    # Add a new vertex if Ctrl is held, regardless of proximity
+    if ctrl_held:
+        waveform_vertices.append((event.xdata, event.ydata))
+        waveform_vertices.sort()  # Keep vertices ordered by x
+        logging.info(f"Ctrl+Click: Added vertex at ({event.xdata:.2f}, {event.ydata:.2f})")
+        update_plot()
+        return
+
+    # Check if click is near an existing vertex to move
+    for i, (x, y) in enumerate(waveform_vertices):
+        if abs(x - event.xdata) < vertex_radius and abs(y - event.ydata) < vertex_radius:
+            selected_vertex = i  # Select this vertex for moving
+            logging.info(f"Selected vertex at ({x:.2f}, {y:.2f}) for moving")
+            return
+
+    # Add new vertex at the click location if not near any vertex
+    waveform_vertices.append((event.xdata, event.ydata))
+    waveform_vertices.sort()  # Keep vertices ordered by x
+    selected_vertex = waveform_vertices.index((event.xdata, event.ydata))  # Track the new vertex
+    logging.info(f"Added vertex at ({event.xdata:.2f}, {event.ydata:.2f})")
+    update_plot()
+
+
+# Mouse release event to release the selected vertex
+def on_release(event):
+    global selected_vertex
+    selected_vertex = None  # Deselect the vertex after releasing
+
+
+# Mouse motion event to move a selected vertex
+def on_motion(event):
+    global selected_vertex
+    if selected_vertex is None or event.inaxes != ax:
+        return
+
+    # Prevent horizontal movement for the first and last vertices
+    if selected_vertex == 0 or selected_vertex == len(waveform_vertices) - 1:
+        new_y = event.ydata
+        waveform_vertices[0] = (0, new_y)
+        waveform_vertices[-1] = (1, new_y)  # Keep the last point at the same y-coordinate
+        logging.info(f"Moved first and last vertices to y={new_y:.2f}")
+    else:
+        # Allow free movement for other vertices
+        old_x, old_y = waveform_vertices[selected_vertex]
+        new_x, new_y = event.xdata, event.ydata
+        waveform_vertices[selected_vertex] = (new_x, new_y)
+        logging.info(f"Moved vertex from ({old_x:.2f}, {old_y:.2f}) to ({new_x:.2f}, {new_y:.2f})")
+
+    update_plot()
+
+
+# Right-click event to remove a vertex
+def on_right_click(event):
+    global waveform_vertices
+    if event.inaxes != ax or event.button != 3:  # Only respond to right-clicks
+        return
+
+    # Prevent deletion of the first and last vertices
+    for i, (x, y) in enumerate(waveform_vertices):
+        if i == 0 or i == len(waveform_vertices) - 1:
+            continue  # Skip deletion for the first and last vertices
+
+        if abs(x - event.xdata) < vertex_radius and abs(y - event.ydata) < vertex_radius:
+            logging.info(f"Removed vertex at ({x:.2f}, {y:.2f})")
+            del waveform_vertices[i]
+            update_plot()
+            break
+
+# Connect Matplotlib events
+fig.canvas.mpl_connect('button_press_event', on_click)
+fig.canvas.mpl_connect('button_release_event', on_release)
+fig.canvas.mpl_connect('motion_notify_event', on_motion)
+fig.canvas.mpl_connect('button_press_event', on_right_click)
 
 # Start the audio stream
 stream = sd.OutputStream(callback=audio_callback, samplerate=sample_rate, channels=1)
