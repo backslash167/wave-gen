@@ -1,0 +1,74 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment folders
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# PyCharm project files
+.idea/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+# Usually contains a lot of files, so use a wildcard to match any .spec file
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.cache/
+pytest_cache/
+cover/
+
+# mypy
+.mypy_cache/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Environments
+# Used by pyenv and virtualenv
+.python-version
+
+# VSCode settings (if using VSCode in addition to PyCharm)
+.vscode/
+
+# MacOS files
+.DS_Store
+
+# Temporary files
+*.swp
+*.swo
+*~
