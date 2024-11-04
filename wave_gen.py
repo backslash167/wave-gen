@@ -14,10 +14,12 @@ frequency = 440
 volume = 0.5
 sample_rate = 44100
 waveform_vertices = [(0, 0), (0.5, 1), (1, 0)]  # Initial sine-like waveform vertices
+output_buffer = np.zeros(1024)  # Buffer for visualization
 
 minimum_delta = 0.0001
 num_points = 10
 interpolation_type = "cubic"  # Default interpolation type
+
 
 # Function to set waveform based on preset selection
 def set_preset_waveform(waveform_type):
@@ -40,18 +42,21 @@ def set_preset_waveform(waveform_type):
     logging.info(f"Set waveform to {waveform_type} preset.")
     update_plot()  # Refresh the plot with the new vertices
 
+current_phase = 0.0  # Tracks the current phase across callbacks
 
 # Function to generate waveform from vertices using interpolation
 def generate_custom_waveform(frames):
+    global current_phase
+    phase_increment = frequency / sample_rate
+
     x_points, y_points = zip(*waveform_vertices)
 
     # Remove duplicates by creating a dictionary (keeps last occurrence of each x value)
     unique_points = dict(zip(x_points, y_points))
     x_points, y_points = zip(*sorted(unique_points.items()))
 
-    # Ensure x_points covers exactly one period, from 0 to 1
-    if x_points[0] != 0 or x_points[-1] != 1:
-        raise ValueError("The x-axis should start at 0 and end at 1 for proper looping.")
+    y_points = list(y_points)
+    y_points[-1] = y_points[0]  # Ensure continuity by matching endpoints
 
     # Choose interpolation type based on the number of unique vertices
     try:
@@ -65,22 +70,34 @@ def generate_custom_waveform(frames):
         logging.error(f"Interpolation failed: {e}. Falling back to linear interpolation.")
         interpolator = interp1d(x_points, y_points, kind="linear", fill_value="extrapolate")
 
-    # Generate time values for the waveform period, using frequency to set the period implicitly
-    t = np.arange(frames) / sample_rate
-    t_scaled = (t * frequency) % 1  # Frequency now controls the repetition rate directly
+    # Generate time values for the current phase, ensuring continuity
+    t = (np.arange(frames) * phase_increment + current_phase) % 1
+    waveform = interpolator(t)
+    waveform = np.clip(waveform, -1, 1)
 
-    # Generate waveform from interpolated function
-    waveform = interpolator(t_scaled)
-    waveform = np.clip(waveform, -1, 1)  # Ensure waveform remains within -1 to 1
+    # Update the current phase to where this buffer ends
+    current_phase = (current_phase + frames * phase_increment) % 1
+
     return waveform
+
+# Function to plot output buffer for visualization
+def plot_output_buffer():
+    ax_output.clear()
+    ax_output.plot(output_buffer, 'r-')
+    ax_output.set_title("Output Buffer Waveform")
+    ax_output.set_ylim(-1.5, 1.5)
+    canvas_output.draw()
 
 
 # Audio callback function
 def audio_callback(outdata, frames, time, status):
-    global volume
+    global volume, output_buffer
     waveform = generate_custom_waveform(frames)
     outdata[:, 0] = (waveform * volume).astype(np.float32)
 
+    # Update output buffer for visualization and plot it
+    output_buffer = waveform  # Copy the waveform into the buffer
+    plot_output_buffer()  # Update plot in real-time
 
 # Initialize the frame counter for the callback function
 audio_callback.current_frame = 0
@@ -118,12 +135,14 @@ def update_volume(val):
     vol_value_label.config(text=str(volume))  # Update the volume value label
     logging.info(f"Volume changed to {volume}")
 
+
 # Function to update interpolation type
 def update_interpolation_type(val):
     global interpolation_type
     interpolation_type = val
     logging.info(f"Interpolation type changed to {interpolation_type}")
     update_plot()
+
 
 # Dropdown menu for interpolation type
 interp_frame = tk.Frame(root)
@@ -132,7 +151,7 @@ interp_label = tk.Label(interp_frame, text="Interpolation Type")
 interp_label.pack(side="left")
 
 interp_var = tk.StringVar(root)
-interp_var.set("cubic")
+interp_var.set("linear")
 interp_dropdown_list = ["linear", "cubic", "nearest", "smooth"]
 
 interp_dropdown = tk.OptionMenu(interp_frame, interp_var, *interp_dropdown_list, command=update_interpolation_type)
@@ -151,9 +170,7 @@ freq_label = tk.Label(freq_frame, text="Frequency (Hz)")
 freq_label.pack()
 
 # Frequency slider
-freq_slider = tk.Scale(
-    freq_frame, from_=20, to=2000, orient='horizontal', command=update_frequency
-)
+freq_slider = tk.Scale(freq_frame, from_=20, to=4000, orient='horizontal', command=update_frequency)
 freq_slider.set(frequency)
 freq_slider.pack()
 
@@ -170,9 +187,7 @@ vol_label = tk.Label(vol_frame, text="Volume")
 vol_label.pack()
 
 # Volume slider
-vol_slider = tk.Scale(
-    vol_frame, from_=0, to=1, resolution=0.01, orient='horizontal', command=update_volume
-)
+vol_slider = tk.Scale(vol_frame, from_=0, to=1, resolution=0.01, orient='horizontal', command=update_volume)
 vol_slider.set(volume)
 vol_slider.pack()
 
@@ -207,6 +222,10 @@ line, = ax.plot(*zip(*waveform_vertices), 'bo-')  # plot vertices as blue circle
 ax.set_xlim(0, 1)
 ax.set_ylim(-1.5, 1.5)
 
+# Output buffer plot for visualizing waveform
+fig_output, ax_output = plt.subplots(figsize=(6, 2))
+canvas_output = FigureCanvasTkAgg(fig_output, master=root)
+canvas_output.get_tk_widget().pack()
 
 # Function to update the plot after modifying vertices
 def update_plot():
@@ -258,19 +277,29 @@ def on_release(event):
     selected_vertex = None  # Deselect the vertex after releasing
 
 
+minimum_delta = 0.01  # Define the minimum delta to keep vertices separated
+
 # Mouse motion event to move a selected vertex
 def on_motion(event):
     global selected_vertex
     if selected_vertex is None or event.inaxes != ax:
         return
 
+    # Restrict movement for the first and last vertices to y-coordinate only
     if selected_vertex == 0:
         waveform_vertices[0] = (0, event.ydata)
     elif selected_vertex == len(waveform_vertices) - 1:
         waveform_vertices[-1] = (1, event.ydata)
     else:
-        # Allow free movement for other vertices
-        waveform_vertices[selected_vertex] = (event.xdata, event.ydata)
+        # Get the x-coordinates of neighboring vertices
+        prev_x = waveform_vertices[selected_vertex - 1][0]
+        next_x = waveform_vertices[selected_vertex + 1][0]
+
+        # Constrain x within neighboring vertices with a minimum delta
+        new_x = min(max(event.xdata, prev_x + minimum_delta), next_x - minimum_delta)
+
+        # Update the selected vertex position with constrained x and new y
+        waveform_vertices[selected_vertex] = (new_x, event.ydata)
 
     update_plot()
 
@@ -298,8 +327,15 @@ fig.canvas.mpl_connect('button_release_event', on_release)
 fig.canvas.mpl_connect('motion_notify_event', on_motion)
 fig.canvas.mpl_connect('button_press_event', on_right_click)
 
-# Start the audio stream
-stream = sd.OutputStream(callback=audio_callback, samplerate=sample_rate, channels=1)
+#stream = sd.OutputStream(callback=audio_callback, samplerate=sample_rate, channels=1)
+stream = sd.OutputStream(
+    callback=audio_callback,
+    samplerate=sample_rate,
+    channels=1,
+    blocksize=(1024*2),
+    latency='low',
+    prime_output_buffers_using_stream_callback=True
+)
 stream.start()
 
 # Run the Tkinter main loop
