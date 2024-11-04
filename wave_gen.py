@@ -3,7 +3,7 @@ import sounddevice as sd
 import tkinter as tk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, make_interp_spline
 import logging
 
 # Set up logging
@@ -17,7 +17,7 @@ waveform_vertices = [(0, 0), (0.5, 1), (1, 0)]  # Initial sine-like waveform ver
 
 minimum_delta = 0.0001
 num_points = 10
-
+interpolation_type = "cubic"  # Default interpolation type
 
 # Function to set waveform based on preset selection
 def set_preset_waveform(waveform_type):
@@ -54,9 +54,15 @@ def generate_custom_waveform(frames):
         raise ValueError("The x-axis should start at 0 and end at 1 for proper looping.")
 
     # Choose interpolation type based on the number of unique vertices
-    if len(x_points) >= 4:
-        interpolator = interp1d(x_points, y_points, kind="cubic", fill_value="extrapolate")
-    else:
+    try:
+        if interpolation_type == "smooth":
+            interpolator = make_interp_spline(x_points, y_points, k=min(3, len(x_points)-1))
+        elif len(x_points) <=4:
+            interpolator = interp1d(x_points, y_points, kind="linear", fill_value="extrapolate")
+        else:
+            interpolator = interp1d(x_points, y_points, kind=interpolation_type, fill_value="extrapolate")
+    except ValueError as e:
+        logging.error(f"Interpolation failed: {e}. Falling back to linear interpolation.")
         interpolator = interp1d(x_points, y_points, kind="linear", fill_value="extrapolate")
 
     # Generate time values for the waveform period, using frequency to set the period implicitly
@@ -65,6 +71,7 @@ def generate_custom_waveform(frames):
 
     # Generate waveform from interpolated function
     waveform = interpolator(t_scaled)
+    waveform = np.clip(waveform, -1, 1)  # Ensure waveform remains within -1 to 1
     return waveform
 
 
@@ -111,6 +118,25 @@ def update_volume(val):
     vol_value_label.config(text=str(volume))  # Update the volume value label
     logging.info(f"Volume changed to {volume}")
 
+# Function to update interpolation type
+def update_interpolation_type(val):
+    global interpolation_type
+    interpolation_type = val
+    logging.info(f"Interpolation type changed to {interpolation_type}")
+    update_plot()
+
+# Dropdown menu for interpolation type
+interp_frame = tk.Frame(root)
+interp_frame.pack(pady=10)
+interp_label = tk.Label(interp_frame, text="Interpolation Type")
+interp_label.pack(side="left")
+
+interp_var = tk.StringVar(root)
+interp_var.set("cubic")
+interp_dropdown_list = ["linear", "cubic", "nearest", "smooth"]
+
+interp_dropdown = tk.OptionMenu(interp_frame, interp_var, *interp_dropdown_list, command=update_interpolation_type)
+interp_dropdown.pack(side="left")
 
 # Create a frame to hold the sliders side by side
 slider_frame = tk.Frame(root)
@@ -191,7 +217,7 @@ def update_plot():
 
 # Vertex interaction management
 selected_vertex = None
-vertex_radius = 0.05  # Threshold distance to detect nearby vertices
+vertex_radius = 0.08  # Threshold distance to detect nearby vertices
 
 
 # Mouse click event to add points anywhere on the graph or move existing ones
@@ -238,18 +264,13 @@ def on_motion(event):
     if selected_vertex is None or event.inaxes != ax:
         return
 
-    # Prevent horizontal movement for the first and last vertices
-    if selected_vertex == 0 or selected_vertex == len(waveform_vertices) - 1:
-        new_y = event.ydata
-        waveform_vertices[0] = (0, new_y)
-        waveform_vertices[-1] = (1, new_y)  # Keep the last point at the same y-coordinate
-        logging.info(f"Moved first and last vertices to y={new_y:.2f}")
+    if selected_vertex == 0:
+        waveform_vertices[0] = (0, event.ydata)
+    elif selected_vertex == len(waveform_vertices) - 1:
+        waveform_vertices[-1] = (1, event.ydata)
     else:
         # Allow free movement for other vertices
-        old_x, old_y = waveform_vertices[selected_vertex]
-        new_x, new_y = event.xdata, event.ydata
-        waveform_vertices[selected_vertex] = (new_x, new_y)
-        logging.info(f"Moved vertex from ({old_x:.2f}, {old_y:.2f}) to ({new_x:.2f}, {new_y:.2f})")
+        waveform_vertices[selected_vertex] = (event.xdata, event.ydata)
 
     update_plot()
 
