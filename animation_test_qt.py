@@ -1,6 +1,6 @@
 import sys
 import numpy as np
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSlider, QLabel
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSlider, QLabel, QCheckBox
 from PyQt5.QtCore import Qt, QTimer
 import pyqtgraph as pg
 import sounddevice as sd
@@ -18,6 +18,18 @@ class SineWaveApp(QMainWindow):
         # Layout
         layout = QVBoxLayout()
         central_widget.setLayout(layout)
+
+        # Add checkboxes
+        self.enable_modulation = QCheckBox("Enable Modulation")
+        self.enable_modulation.setChecked(True)  # Default: Checked
+        self.enable_modulation.stateChanged.connect(self.toggle_modulation)
+        layout.addWidget(self.enable_modulation)
+
+        self.enable_feedback = QCheckBox("Enable Feedback")
+        self.enable_feedback.setChecked(True)  # Default: Checked
+        self.enable_feedback.stateChanged.connect(self.toggle_feedback)
+        layout.addWidget(self.enable_feedback)
+
 
         # PyQtGraph plot widget
         self.plot_widget = pg.PlotWidget()
@@ -44,6 +56,11 @@ class SineWaveApp(QMainWindow):
         self.x = np.linspace(0, 2 * np.pi, self.sample_rate)
         self.y = self.amplitude * np.sin(self.x)
         self.pvel = 0
+        self.amp = 0
+        self.mag = 0
+        self.fb = 0
+        self.modulation_enabled = False
+        self.feedback_enabled = False
 
         # PyQtGraph plot setup
         self.plot = self.plot_widget.plot(self.x, self.y, pen=pg.mkPen('r', width=3))
@@ -85,6 +102,10 @@ class SineWaveApp(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(16)  # ~60 FPS
+        self.add_slider("AMP", 1, 20000, self.amp, lambda value: setattr(self, 'amp', value), layout)
+        self.add_slider("MAG", -100, 100, self.mag, lambda value: setattr(self, 'mag', value), layout)
+        self.add_slider("FB", -200, 200, self.fb, lambda value: setattr(self, 'fb', value), layout)
+
 
         # Start audio stream
         self.stream = sd.OutputStream(
@@ -94,6 +115,34 @@ class SineWaveApp(QMainWindow):
             blocksize=self.buffer_size
         )
         self.stream.start()
+
+    def add_slider(self, label_text, min_value, max_value, default_value, callback, layout, step=None):
+        """
+        Adds a labeled slider to the layout.
+
+        :param label_text: Text for the slider label.
+        :param min_value: Minimum slider value.
+        :param max_value: Maximum slider value.
+        :param default_value: Default slider value.
+        :param callback: Function to call when the slider value changes.
+        :param layout: Layout to add the slider and label to.
+        :param: step: Single step size
+        """
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(min_value, max_value)
+        slider.setValue(default_value)
+        slider.setSingleStep(step if step else 1)
+        slider.valueChanged.connect(callback)
+        if label_text:
+            layout.addWidget(QLabel(label_text))
+        layout.addWidget(slider)
+
+    # Add these methods to handle checkbox state changes
+    def toggle_modulation(self, state):
+        self.modulation_enabled = state == Qt.Checked
+
+    def toggle_feedback(self, state):
+        self.feedback_enabled = state == Qt.Checked
 
 
     def update_frequency(self, value):
@@ -114,16 +163,32 @@ class SineWaveApp(QMainWindow):
 
         # Generate audio samples with frequency, amplitude, and phase
         t = np.arange(frames) / self.sample_rate
+
         samples = self.amplitude * np.sin(2 * np.pi * self.frequency * t + self.phase)
 
-        samples = samples * np.sin(2 * np.pi * t + self.phase)
+        #samples = samples // 1
+
+        if self.modulation_enabled:
+            # samples = (self.mag/100) * samples * np.sin(2 * np.pi * self.amp * t + self.phase)
+            samples += (self.mag/100) * np.sin(1.5 * np.pi * self.amp * t + self.phase)
+
+        # apply feedback
+        if self.feedback_enabled:
+            samples += samples//1 * (self.fb/100)
+
+        # Normalize
+        # samples = samples / np.max(np.abs(samples))
+
+        samples = np.clip(samples, -1, 1)
 
         # Update the buffer plot
         self.buffer_y = samples
         self.buffer_plot.setData(self.buffer_x, self.buffer_y)
 
         # Update phase for continuity
+        # self.phase += 2 * np.pi * self.frequency * frames / self.sample_rate
         self.phase += 2 * np.pi * self.frequency * frames / self.sample_rate
+        self.phase %= 2 * np.pi  # Keep phase in the range [0, 2π]
 
         # Output audio buffer
         outdata[:, 0] = samples
