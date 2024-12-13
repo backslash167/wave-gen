@@ -23,6 +23,10 @@ interpolation_type = "cubic"  # Default interpolation type
 
 # Function to set waveform based on preset selection
 def set_preset_waveform(waveform_type):
+    '''
+    :param waveform_type:
+    :return:
+    '''
     global waveform_vertices
     if waveform_type == 'sine':
         # Generate `num_points` vertices for a smooth sine wave
@@ -85,7 +89,7 @@ def plot_output_buffer():
     ax_output.clear()
     ax_output.plot(output_buffer, 'r-')
     ax_output.set_title("Output Buffer Waveform")
-    ax_output.set_ylim(-1.5, 1.5)
+    ax_output.set_ylim(-1.0, 1.0)
     canvas_output.draw()
 
 
@@ -93,10 +97,11 @@ def plot_output_buffer():
 def audio_callback(outdata, frames, time, status):
     global volume, output_buffer
     waveform = generate_custom_waveform(frames)
-    outdata[:, 0] = (waveform * volume).astype(np.float32)
+    outdata[:, 0] = (waveform * volume).astype(np.float32) # left
+    outdata[:, 1] = (waveform * 0).astype(np.float32) # right
 
     # Update output buffer for visualization and plot it
-    output_buffer = waveform  # Copy the waveform into the buffer
+    output_buffer = waveform * volume  # Copy the waveform into the buffer
     plot_output_buffer()  # Update plot in real-time
 
 # Initialize the frame counter for the callback function
@@ -220,7 +225,7 @@ canvas.get_tk_widget().pack()
 # Plot initial waveform and set axis limits
 line, = ax.plot(*zip(*waveform_vertices), 'bo-')  # plot vertices as blue circles connected by lines
 ax.set_xlim(0, 1)
-ax.set_ylim(-1.5, 1.5)
+ax.set_ylim(-1.0, 1.0)
 
 # Output buffer plot for visualizing waveform
 fig_output, ax_output = plt.subplots(figsize=(6, 2))
@@ -331,7 +336,7 @@ fig.canvas.mpl_connect('button_press_event', on_right_click)
 stream = sd.OutputStream(
     callback=audio_callback,
     samplerate=sample_rate,
-    channels=1,
+    channels=2,
     blocksize=(1024*2),
     latency='low',
     prime_output_buffers_using_stream_callback=True
